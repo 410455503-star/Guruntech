@@ -1,0 +1,657 @@
+function renderProjects() {
+  const state = store.getState();
+  const projects = state.projects;
+  
+  const html = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">项目管理</h1>
+        <p class="page-description">管理所有工程项目</p>
+      </div>
+      <div class="action-bar">
+        <div class="view-toggle">
+          <button class="active" data-view="grid" title="网格视图">
+            <i class="fas fa-th-large"></i>
+          </button>
+          <button data-view="list" title="列表视图">
+            <i class="fas fa-list"></i>
+          </button>
+        </div>
+        <button class="btn btn-primary" onclick="showCreateProjectModal()">
+          <i class="fas fa-plus"></i>
+          新建项目
+        </button>
+      </div>
+    </div>
+    
+    <div class="filter-bar">
+      <div class="filter-search">
+        <i class="fas fa-search"></i>
+        <input type="text" placeholder="搜索项目名称或描述..." id="projectSearch">
+      </div>
+      <div class="filter-item">
+        <label class="filter-label">状态:</label>
+        <select class="filter-select" id="statusFilter">
+          <option value="all">全部</option>
+          <option value="planning">筹备中</option>
+          <option value="active">进行中</option>
+          <option value="completed">已完成</option>
+          <option value="paused">已暂停</option>
+          <option value="terminated">已终止</option>
+        </select>
+      </div>
+      <div class="filter-item">
+        <label class="filter-label">优先级:</label>
+        <select class="filter-select" id="priorityFilter">
+          <option value="all">全部</option>
+          <option value="urgent">紧急</option>
+          <option value="high">高</option>
+          <option value="medium">中</option>
+          <option value="low">低</option>
+        </select>
+      </div>
+    </div>
+    
+    <div id="projectContent">
+      ${renderProjectGrid(projects)}
+    </div>
+  `;
+  
+  return html;
+}
+
+function renderProjectGrid(projects) {
+  if (projects.length === 0) {
+    return `
+      <div class="empty-state">
+        <i class="fas fa-folder-open" style="font-size: 64px;"></i>
+        <h3>暂无项目</h3>
+        <p class="text-muted">点击"新建项目"按钮创建第一个项目</p>
+        <button class="btn btn-primary mt-16" onclick="showCreateProjectModal()">
+          <i class="fas fa-plus"></i>
+          新建项目
+        </button>
+      </div>
+    `;
+  }
+  
+  return `
+    <div class="project-grid">
+      ${projects.map(project => renderProjectCard(project)).join('')}
+    </div>
+  `;
+}
+
+function renderProjectCard(project) {
+  const progress = store.getProjectProgress(project.id);
+  
+  return `
+    <div class="project-card fade-in" onclick="showProjectDetail('${project.id}')">
+      <div class="project-card-header">
+        <div class="project-card-actions">
+          <button onclick="event.stopPropagation(); showEditProjectModal('${project.id}')" title="编辑">
+            <i class="fas fa-edit"></i>
+          </button>
+          <button onclick="event.stopPropagation(); confirmDeleteProject('${project.id}')" title="删除">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+        <div class="project-card-title">${project.name}</div>
+        <span class="project-card-status">${getStatusName(project.status)}</span>
+      </div>
+      <div class="project-card-body">
+        <div class="project-card-info">
+          <span><i class="fas fa-calendar"></i> ${DateUtils.formatDate(project.startDate)}</span>
+          <span><i class="fas fa-calendar-check"></i> ${DateUtils.formatDate(project.endDate)}</span>
+        </div>
+        <p class="text-muted line-clamp-2 mb-16">${project.description}</p>
+        <div class="project-card-progress">
+          <div class="progress-label">
+            <span class="text-sm">完成进度</span>
+            <span class="progress-percentage">${progress}%</span>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-bar-fill" style="width: ${progress}%;"></div>
+          </div>
+        </div>
+        <div class="project-card-footer">
+          <div class="project-card-members">
+            ${project.members.slice(0, 4).map(memberId => {
+              const member = store.getUserById(memberId);
+              return `<div class="project-card-member" title="${member?.name}">${getInitials(member?.name)}</div>`;
+            }).join('')}
+            ${project.members.length > 4 ? `<div class="project-card-member">+${project.members.length - 4}</div>` : ''}
+          </div>
+          <span class="tag tag-${getPriorityTagColor(project.priority)}">${getPriorityName(project.priority)}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function showProjectDetail(projectId) {
+  store.setState({ currentProjectId: projectId });
+  router.navigate(`projects/${projectId}`);
+  renderContent();
+}
+
+function showCreateProjectModal() {
+  const state = store.getState();
+  const users = state.users;
+  
+  const html = `
+    <div class="modal-overlay" id="createProjectModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 class="modal-title">新建项目</h3>
+          <button class="btn btn-secondary btn-sm" onclick="closeModal('createProjectModal')">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <form id="createProjectForm">
+            <div class="form-group">
+              <label class="form-label">项目名称 <span style="color: red;">*</span></label>
+              <input type="text" class="form-input" name="name" required placeholder="请输入项目名称">
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">项目描述 <span style="color: red;">*</span></label>
+              <textarea class="form-input form-textarea" name="description" required placeholder="请输入项目描述"></textarea>
+            </div>
+            
+            <div class="grid grid-cols-2">
+              <div class="form-group">
+                <label class="form-label">开始日期 <span style="color: red;">*</span></label>
+                <input type="date" class="form-input" name="startDate" required>
+              </div>
+              
+              <div class="form-group">
+                <label class="form-label">结束日期 <span style="color: red;">*</span></label>
+                <input type="date" class="form-input" name="endDate" required>
+              </div>
+            </div>
+            
+            <div class="grid grid-cols-2">
+              <div class="form-group">
+                <label class="form-label">优先级 <span style="color: red;">*</span></label>
+                <select class="form-select" name="priority" required>
+                  <option value="">请选择优先级</option>
+                  <option value="urgent">紧急</option>
+                  <option value="high">高</option>
+                  <option value="medium">中</option>
+                  <option value="low">低</option>
+                </select>
+              </div>
+              
+              <div class="form-group">
+                <label class="form-label">状态</label>
+                <select class="form-select" name="status">
+                  <option value="planning">筹备中</option>
+                  <option value="active" selected>进行中</option>
+                  <option value="paused">已暂停</option>
+                </select>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">项目成员</label>
+              <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-height: 150px; overflow-y: auto; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;">
+                ${users.map(user => `
+                  <label style="display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 4px; cursor: pointer; transition: background 0.2s;">
+                    <input type="checkbox" name="members" value="${user.id}">
+                    <span>${user.name}</span>
+                    <span class="text-muted text-sm">(${getRoleName(user.role)})</span>
+                  </label>
+                `).join('')}
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal('createProjectModal')">取消</button>
+          <button class="btn btn-primary" onclick="handleCreateProject()">创建</button>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  document.body.appendChild(div);
+}
+
+function handleCreateProject() {
+  const form = document.getElementById('createProjectForm');
+  const formData = new FormData(form);
+  
+  const data = {
+    name: formData.get('name'),
+    description: formData.get('description'),
+    startDate: formData.get('startDate'),
+    endDate: formData.get('endDate'),
+    priority: formData.get('priority'),
+    status: formData.get('status'),
+    members: formData.getAll('members') || [],
+    progress: 0
+  };
+  
+  const validation = Validate.validateProject(data);
+  if (!validation.isValid) {
+    alert(Object.values(validation.errors)[0]);
+    return;
+  }
+  
+  store.addProject(data);
+  closeModal('createProjectModal');
+  renderContent();
+  store.addNotification({
+    type: 'success',
+    title: '项目创建成功',
+    message: `项目"${data.name}"已成功创建`
+  });
+}
+
+function showEditProjectModal(projectId) {
+  const project = store.getProjectById(projectId);
+  if (!project) return;
+  
+  const users = store.getState().users;
+  
+  const html = `
+    <div class="modal-overlay" id="editProjectModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 class="modal-title">编辑项目</h3>
+          <button class="btn btn-secondary btn-sm" onclick="closeModal('editProjectModal')">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <form id="editProjectForm">
+            <input type="hidden" name="id" value="${project.id}">
+            
+            <div class="form-group">
+              <label class="form-label">项目名称 <span style="color: red;">*</span></label>
+              <input type="text" class="form-input" name="name" required value="${project.name}">
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">项目描述 <span style="color: red;">*</span></label>
+              <textarea class="form-input form-textarea" name="description" required>${project.description}</textarea>
+            </div>
+            
+            <div class="grid grid-cols-2">
+              <div class="form-group">
+                <label class="form-label">开始日期 <span style="color: red;">*</span></label>
+                <input type="date" class="form-input" name="startDate" required value="${project.startDate}">
+              </div>
+              
+              <div class="form-group">
+                <label class="form-label">结束日期 <span style="color: red;">*</span></label>
+                <input type="date" class="form-input" name="endDate" required value="${project.endDate}">
+              </div>
+            </div>
+            
+            <div class="grid grid-cols-2">
+              <div class="form-group">
+                <label class="form-label">优先级 <span style="color: red;">*</span></label>
+                <select class="form-select" name="priority" required>
+                  <option value="urgent" ${project.priority === 'urgent' ? 'selected' : ''}>紧急</option>
+                  <option value="high" ${project.priority === 'high' ? 'selected' : ''}>高</option>
+                  <option value="medium" ${project.priority === 'medium' ? 'selected' : ''}>中</option>
+                  <option value="low" ${project.priority === 'low' ? 'selected' : ''}>低</option>
+                </select>
+              </div>
+              
+              <div class="form-group">
+                <label class="form-label">状态</label>
+                <select class="form-select" name="status">
+                  <option value="planning" ${project.status === 'planning' ? 'selected' : ''}>筹备中</option>
+                  <option value="active" ${project.status === 'active' ? 'selected' : ''}>进行中</option>
+                  <option value="completed" ${project.status === 'completed' ? 'selected' : ''}>已完成</option>
+                  <option value="paused" ${project.status === 'paused' ? 'selected' : ''}>已暂停</option>
+                  <option value="terminated" ${project.status === 'terminated' ? 'selected' : ''}>已终止</option>
+                </select>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">项目成员</label>
+              <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-height: 150px; overflow-y: auto; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;">
+                ${users.map(user => `
+                  <label style="display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 4px; cursor: pointer; transition: background 0.2s;">
+                    <input type="checkbox" name="members" value="${user.id}" ${project.members.includes(user.id) ? 'checked' : ''}>
+                    <span>${user.name}</span>
+                    <span class="text-muted text-sm">(${getRoleName(user.role)})</span>
+                  </label>
+                `).join('')}
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal('editProjectModal')">取消</button>
+          <button class="btn btn-primary" onclick="handleEditProject()">保存</button>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  document.body.appendChild(div);
+}
+
+function handleEditProject() {
+  const form = document.getElementById('editProjectForm');
+  const formData = new FormData(form);
+  
+  const data = {
+    name: formData.get('name'),
+    description: formData.get('description'),
+    startDate: formData.get('startDate'),
+    endDate: formData.get('endDate'),
+    priority: formData.get('priority'),
+    status: formData.get('status'),
+    members: formData.getAll('members') || []
+  };
+  
+  const validation = Validate.validateProject(data);
+  if (!validation.isValid) {
+    alert(Object.values(validation.errors)[0]);
+    return;
+  }
+  
+  const projectId = formData.get('id');
+  store.updateProject(projectId, data);
+  closeModal('editProjectModal');
+  renderContent();
+}
+
+function confirmDeleteProject(projectId) {
+  const project = store.getProjectById(projectId);
+  if (!project) return;
+  
+  if (confirm(`确定要删除项目"${project.name}"吗？此操作不可恢复。`)) {
+    store.deleteProject(projectId);
+    renderContent();
+    store.addNotification({
+      type: 'warning',
+      title: '项目已删除',
+      message: `项目"${project.name}"已被删除`
+    });
+  }
+}
+
+function renderProjectDetail(projectId) {
+  const project = store.getProjectById(projectId);
+  if (!project) {
+    return `
+      <div class="empty-state">
+        <i class="fas fa-exclamation-triangle" style="font-size: 64px;"></i>
+        <h3>项目不存在</h3>
+        <p class="text-muted">该项目可能已被删除</p>
+        <button class="btn btn-primary mt-16" onclick="router.navigate('projects'); renderContent();">
+          返回项目列表
+        </button>
+      </div>
+    `;
+  }
+  
+  const tasks = store.getTasksByProject(projectId);
+  const documents = store.getState().documents.filter(d => d.projectId === projectId);
+  const progress = store.getProjectProgress(projectId);
+  
+  const html = `
+    <div class="page-header">
+      <div>
+        <div class="breadcrumb">
+          <a href="#" onclick="router.navigate('projects'); renderContent(); return false;">项目管理</a>
+          <span class="breadcrumb-separator">/</span>
+          <span class="breadcrumb-current">${project.name}</span>
+        </div>
+        <h1 class="page-title">${project.name}</h1>
+        <p class="page-description">${project.description}</p>
+      </div>
+      <div class="action-bar">
+        <button class="btn btn-secondary" onclick="showEditProjectModal('${project.id}')">
+          <i class="fas fa-edit"></i>
+          编辑项目
+        </button>
+        <button class="btn btn-primary" onclick="showCreateTaskModal('${project.id}')">
+          <i class="fas fa-plus"></i>
+          添加任务
+        </button>
+      </div>
+    </div>
+    
+    <div class="grid" style="grid-template-columns: 3fr 1fr; gap: 24px;">
+      <div>
+        <div class="card mb-24">
+          <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 20px;">项目信息</h3>
+          <div class="grid grid-cols-2" style="gap: 20px;">
+            <div>
+              <div class="text-muted text-sm mb-4">状态</div>
+              <span class="tag tag-${getStatusTagColor(project.status)}">${getStatusName(project.status)}</span>
+            </div>
+            <div>
+              <div class="text-muted text-sm mb-4">优先级</div>
+              <span class="tag tag-${getPriorityTagColor(project.priority)}">${getPriorityName(project.priority)}</span>
+            </div>
+            <div>
+              <div class="text-muted text-sm mb-4">开始日期</div>
+              <div class="font-medium">${DateUtils.formatDate(project.startDate)}</div>
+            </div>
+            <div>
+              <div class="text-muted text-sm mb-4">结束日期</div>
+              <div class="font-medium">${DateUtils.formatDate(project.endDate)}</div>
+            </div>
+            <div>
+              <div class="text-muted text-sm mb-4">工期</div>
+              <div class="font-medium">${DateUtils.formatDuration(project.startDate, project.endDate)}</div>
+            </div>
+            <div>
+              <div class="text-muted text-sm mb-4">完成进度</div>
+              <div class="font-medium">${progress}%</div>
+            </div>
+          </div>
+          <div style="margin-top: 20px;">
+            <div class="progress-label mb-8">
+              <span class="text-sm">整体进度</span>
+              <span class="progress-percentage">${progress}%</span>
+            </div>
+            <div class="progress-bar" style="height: 12px;">
+              <div class="progress-bar-fill" style="width: ${progress}%;"></div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="card mb-24">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3 style="font-size: 18px; font-weight: 600;">项目任务 (${tasks.length})</h3>
+            <button class="btn btn-primary btn-sm" onclick="showCreateTaskModal('${project.id}')">
+              <i class="fas fa-plus"></i>
+              添加任务
+            </button>
+          </div>
+          ${renderProjectTasks(tasks)}
+        </div>
+        
+        <div class="card">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3 style="font-size: 18px; font-weight: 600;">项目文档 (${documents.length})</h3>
+            <button class="btn btn-primary btn-sm" onclick="showUploadDocumentModal('${project.id}')">
+              <i class="fas fa-upload"></i>
+              上传文档
+            </button>
+          </div>
+          ${renderProjectDocuments(documents)}
+        </div>
+      </div>
+      
+      <div>
+        <div class="card mb-24">
+          <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 20px;">项目成员</h3>
+          ${renderProjectMembers(project.members)}
+        </div>
+        
+        <div class="card">
+          <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 20px;">项目统计</h3>
+          <div style="display: flex; flex-direction: column; gap: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span class="text-muted">总任务</span>
+              <span class="font-semibold text-xl">${tasks.length}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span class="text-muted">已完成</span>
+              <span class="font-semibold text-xl" style="color: var(--success-color);">
+                ${tasks.filter(t => t.status === 'completed').length}
+              </span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span class="text-muted">进行中</span>
+              <span class="font-semibold text-xl" style="color: var(--warning-color);">
+                ${tasks.filter(t => t.status === 'in_progress').length}
+              </span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span class="text-muted">待开始</span>
+              <span class="font-semibold text-xl" style="color: var(--primary-color);">
+                ${tasks.filter(t => t.status === 'todo').length}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  return html;
+}
+
+function renderProjectTasks(tasks) {
+  if (tasks.length === 0) {
+    return `
+      <div class="empty-state">
+        <i class="fas fa-tasks" style="font-size: 48px;"></i>
+        <h3>暂无任务</h3>
+        <p class="text-muted">点击"添加任务"创建第一个任务</p>
+      </div>
+    `;
+  }
+  
+  return `
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      ${tasks.map(task => {
+        const assignee = store.getUserById(task.assigneeId);
+        const isOverdue = DateUtils.isPast(task.dueDate) && task.status !== 'completed';
+        
+        return `
+          <div style="display: flex; align-items: center; gap: 16px; padding: 16px; background: var(--bg-light); border-radius: 8px;">
+            <div class="avatar avatar-sm">
+              ${getInitials(assignee?.name)}
+            </div>
+            <div style="flex: 1; min-width: 0;">
+              <div style="font-weight: 500; margin-bottom: 4px;">${task.name}</div>
+              <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
+                <span class="tag tag-${getPriorityTagColor(task.priority)}">${getPriorityName(task.priority)}</span>
+                <span class="${isOverdue ? 'text-danger' : 'text-muted'}">
+                  ${DateUtils.formatDate(task.dueDate)}
+                </span>
+              </div>
+            </div>
+            <div style="width: 120px;">
+              <div class="progress-label mb-4">
+                <span class="text-xs">${task.progress}%</span>
+              </div>
+              <div class="progress-bar">
+                <div class="progress-bar-fill" style="width: ${task.progress}%;"></div>
+              </div>
+            </div>
+            <span class="tag tag-${getStatusTagColor(task.status)}">${getTaskStatusName(task.status)}</span>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-secondary btn-sm" onclick="showEditTaskModal('${task.id}')">
+                <i class="fas fa-edit"></i>
+              </button>
+              <button class="btn btn-danger btn-sm" onclick="confirmDeleteTask('${task.id}')">
+                <i class="fas fa-trash"></i>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function renderProjectDocuments(documents) {
+  if (documents.length === 0) {
+    return `
+      <div class="empty-state">
+        <i class="fas fa-file" style="font-size: 48px;"></i>
+        <h3>暂无文档</h3>
+        <p class="text-muted">点击"上传文档"添加项目文档</p>
+      </div>
+    `;
+  }
+  
+  return `
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      ${documents.map(doc => `
+        <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-light); border-radius: 8px;">
+          <i class="fas fa-file-alt" style="font-size: 24px; color: var(--primary-color);"></i>
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-weight: 500;">${doc.name}</div>
+            <div class="text-muted text-sm">
+              ${(doc.size / 1024).toFixed(2)} KB · ${DateUtils.formatDateTime(doc.uploadedAt)}
+            </div>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="downloadDocument('${doc.id}')">
+            <i class="fas fa-download"></i>
+          </button>
+          <button class="btn btn-danger btn-sm" onclick="confirmDeleteDocument('${doc.id}')">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderProjectMembers(memberIds) {
+  if (memberIds.length === 0) {
+    return `
+      <div class="empty-state">
+        <i class="fas fa-users" style="font-size: 48px;"></i>
+        <h3>暂无成员</h3>
+        <p class="text-muted">编辑项目添加成员</p>
+      </div>
+    `;
+  }
+  
+  return `
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      ${memberIds.map(memberId => {
+        const member = store.getUserById(memberId);
+        if (!member) return '';
+        
+        return `
+          <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-light); border-radius: 8px;">
+            <div class="avatar">
+              ${getInitials(member.name)}
+            </div>
+            <div style="flex: 1;">
+              <div style="font-weight: 500;">${member.name}</div>
+              <div class="text-muted text-sm">${getRoleName(member.role)}</div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { renderProjects, renderProjectDetail };
+}
